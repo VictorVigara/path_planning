@@ -37,6 +37,8 @@ class GlobalPlanner(Node):
         self.logger = self.get_logger()
         self.logger.info("Global planner node initialized")
 
+        self.timer = self.create_timer(0.1, self.waypoint_callback)
+
     def vehicle_command_callback(self, msg): 
         self.vehicle_command = msg.command
         self.vehicle_command_p1 = msg.param1
@@ -50,12 +52,22 @@ class GlobalPlanner(Node):
                     self.logger.info("Disarming")
             elif self.vehicle_command == 21: 
                 self.logger.info("Landing")
-                
 
+    def waypoint_callback(self): 
+        wayp_msg = self.create_waypoint_msg(0.0, 0.0, 2.0)
+        self.waypoint_publisher.publish(wayp_msg)
 
+    def create_waypoint_msg(self, x, y, z):
+        waypoint_msg = Vector3Stamped()
+
+        waypoint_msg.header.stamp = self.get_clock().now().to_msg()
+        waypoint_msg.header.frame_id = 'base_link'
+
+        waypoint_msg.vector.x = x
+        waypoint_msg.vector.y = y
+        waypoint_msg.vector.z = z 
         
-
-        
+        return waypoint_msg
 
 def main(): 
     rclpy.init()
