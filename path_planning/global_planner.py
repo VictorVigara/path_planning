@@ -6,8 +6,9 @@ import math
 import time
 
 from geometry_msgs.msg import Vector3Stamped
-
 from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleCommand, VehicleLocalPosition, VehicleStatus
+
+from .trajectory_generation.square_trajectory import square_vertices
 
 class VehicleCommandMapping: 
     VEHICLE_CMD_NAV_LAND = 21
@@ -38,7 +39,7 @@ class GlobalPlanner(Node):
         self.waypoint_publisher = self.create_publisher(Vector3Stamped, "/global_waypoint", qos_profile)
 
         ### Parameters ###
-        self.mode = ''  # 'square' sends a square trajectory
+        self.mode = 'square'  # 'square' sends a square trajectory
 
         # Square traj params
         self.square_side = 4.0
@@ -51,7 +52,7 @@ class GlobalPlanner(Node):
             176: "VEHICLE_CMD_DO_SET_MODE",
         }
         self.vehicle_position = [0.0, 0.0, 0.0]
-        self.trajectory_waypoints = self.square_vertices()
+        self.trajectory_waypoints = square_vertices(self.square_side, self.square_height)
         self.wayp_idx = 0
 
         self.logger = self.get_logger()
@@ -111,29 +112,7 @@ class GlobalPlanner(Node):
         
         return waypoint_msg
     
-    def square_vertices(self):
-        """
-        Calculate the coordinates of all four vertices of a square given one vertex.
-        
-        Args:
-            x (float): x-coordinate of one vertex.
-            y (float): y-coordinate of one vertex.
-            self.square_side (float): Length of one side of the square.
-            height (float): Height of the square.
-            
-        Returns:
-            tuple: A tuple containing four tuples, each representing the coordinates of one vertex.
-        """
-        # Calculate coordinates of other three vertices
-        x1 = self.square_side
-        y1 = 0.0
-        x2 = self.square_side
-        y2 = self.square_side
-        x3 = 0.0
-        y3 = self.square_side
-
-        # Return the coordinates as a tuple of tuples
-        return [[0.0, 0.0, self.square_height], [x1, y1, self.square_height], [x2, y2, self.square_height], [x3, y3, self.square_height]]
+    
     
     def distance_to_vertex(self, vertex_index):
         """
