@@ -3,6 +3,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 
 import math
+import time
 
 from geometry_msgs.msg import Vector3Stamped
 
@@ -36,7 +37,10 @@ class GlobalPlanner(Node):
         # Publishers
         self.waypoint_publisher = self.create_publisher(Vector3Stamped, "/global_waypoint", qos_profile)
 
-        # Parameters
+        ### Parameters ###
+        self.mode = ''  # 'square' sends a square trajectory
+
+        # Square traj params
         self.square_side = 4.0
         self.square_height = 1.0
 
@@ -79,19 +83,21 @@ class GlobalPlanner(Node):
                 self.logger.info("Landing")
 
     def waypoint_callback(self): 
+        
+        if self.mode == 'square': 
+            target_distance = self.distance_to_vertex(self.wayp_idx)
+            self.get_logger().info(f"Distance to next waypoint {target_distance} m")
 
-        target_distance = self.distance_to_vertex(self.wayp_idx)
-        self.get_logger().info(f"Distance to next waypoint {target_distance} m")
+            if target_distance < 0.3: 
+                time.sleep(10)
+                if self.wayp_idx == 3: 
+                    self.wayp_idx = 0
+                else:
+                    self.wayp_idx += 1
 
-        if target_distance < 0.3: 
-            if self.wayp_idx == 3: 
-                self.wayp_idx = 0
-            else:
-                self.wayp_idx += 1
-
-        target_waypoint = self.trajectory_waypoints[self.wayp_idx]
-        wayp_msg = self.create_waypoint_msg(target_waypoint[0], target_waypoint[1], target_waypoint[2])
-        self.waypoint_publisher.publish(wayp_msg)
+            target_waypoint = self.trajectory_waypoints[self.wayp_idx]
+            wayp_msg = self.create_waypoint_msg(target_waypoint[0], target_waypoint[1], target_waypoint[2])
+            self.waypoint_publisher.publish(wayp_msg)
 
     def create_waypoint_msg(self, x, y, z):
         waypoint_msg = Vector3Stamped()
