@@ -52,7 +52,8 @@ class GlobalPlanner(Node):
             176: "VEHICLE_CMD_DO_SET_MODE",
         }
         self.vehicle_position = [0.0, 0.0, 0.0]
-        self.trajectory_waypoints = square_vertices(self.square_side, self.square_height)
+        #self.trajectory_waypoints = square_vertices(self.square_side, self.square_height)
+        self.trajectory_waypoints = [[0.0, 0.0, 1.0], [1.0, 0.0, 1.0]]
         self.wayp_idx = 0
 
         self.logger = self.get_logger()
@@ -63,8 +64,8 @@ class GlobalPlanner(Node):
     def vehicle_local_position_callback(self, vehicle_local_position):
         """Callback function for vehicle_local_position topic subscriber."""
         # Convert NED (px4) to ENU (ROS)
-        x = vehicle_local_position.x
-        y = -vehicle_local_position.y
+        x = vehicle_local_position.y
+        y = vehicle_local_position.x
         z = -vehicle_local_position.z
 
         self.vehicle_position = [x, y, z]
