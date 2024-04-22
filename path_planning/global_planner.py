@@ -4,8 +4,12 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPo
 
 import math
 import time
+import pickle
+import numpy as np
 
 from geometry_msgs.msg import Vector3Stamped
+from sensor_msgs.msg import PointCloud2, PointField
+from sensor_msgs_py import point_cloud2
 from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleCommand, VehicleLocalPosition, VehicleStatus
 
 from .trajectory_generation.square_trajectory import square_vertices
@@ -34,9 +38,14 @@ class GlobalPlanner(Node):
         
         self.vehicle_command_subscriber = self.create_subscription(
             VehicleCommand, "/fmu/in/vehicle_command", self.vehicle_command_callback, qos_profile)
+        
+        self.octomap_pc2_sub = self.create_subscription(
+            PointCloud2, '/octomap_point_cloud_centers', self.octomap_pc2_callback, 10)
 
         # Publishers
         self.waypoint_publisher = self.create_publisher(Vector3Stamped, "/global_waypoint", qos_profile)
+
+        self.pc2_pub = self.create_publisher(PointCloud2, 'read_pc', 10)
 
         ### Parameters ###
         self.mode = 'square'  # 'square' sends a square trajectory
@@ -44,6 +53,8 @@ class GlobalPlanner(Node):
         # Square traj params
         self.square_side = 4.0
         self.square_height = 1.0
+
+        self.save_pc2_octomap = True
 
         # Initialize variables
         self.command_mapping = {
@@ -60,6 +71,38 @@ class GlobalPlanner(Node):
         self.logger.info("Global planner node initialized")
 
         self.timer = self.create_timer(0.1, self.waypoint_callback)
+
+    def octomap_pc2_callback(self, pointcloud: PointCloud2) -> None:
+        self.get_logger().info("Octomap pointcloud received")
+        pc2_list = []
+        
+        for p in point_cloud2.read_points(pointcloud, field_names = ("x", "y", "z"), skip_nans=True):
+            # Get XYZ coordinates to calculate vertical angle and filter by vertical scans
+            x = p[0]
+            y = p[1]
+            z = p[2]
+
+            pc2_list.append([x, y, z])
+
+        if self.save_pc2_octomap: 
+            with open("pc2_octomap_list", "wb") as fp:   #Pickling
+                pickle.dump(pc2_list, fp)
+
+            self.save_pc2_octomap = False
+                    
+        pc2_cropped = PointCloud2()
+        pc2_cropped.header = pointcloud.header
+        pc2_cropped.height = 1
+        pc2_cropped.width = len(pc2_list)
+        pc2_cropped.fields.append(PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1))
+        pc2_cropped.fields.append(PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1))
+        pc2_cropped.fields.append(PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1))
+        pc2_cropped.is_bigendian = False
+        pc2_cropped.point_step = 12  # 4 (x) + 4 (y) + 4 (z) bytes per point
+        pc2_cropped.row_step = pc2_cropped.point_step * len(pc2_list)
+        pc2_cropped.data = np.array(pc2_list, dtype=np.float32).tobytes()
+        self.pc2_pub.publish(pc2_cropped)
+
 
     def vehicle_local_position_callback(self, vehicle_local_position):
         """Callback function for vehicle_local_position topic subscriber."""
