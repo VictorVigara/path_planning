@@ -130,7 +130,7 @@ class GlobalPlanner(Node):
     def waypoint_callback(self): 
         
         if self.mode == 'square': 
-            target_distance = self.distance_to_vertex(self.wayp_idx)
+            target_distance = self.distance_to_target(self.wayp_idx)
             self.get_logger().info(f"Distance to next waypoint {target_distance} m")
 
             if target_distance < 0.3: 
@@ -156,30 +156,28 @@ class GlobalPlanner(Node):
         
         return waypoint_msg
     
-    
-    
-    def distance_to_vertex(self, vertex_index):
+    def distance_to_target(self, target_waypoint_idx):
         """
-        Calculate the distance between the vehicle position and a square vertex.
+        Calculate the distance between the vehicle position and target waypoint
 
         Args:
-            vertex_index (int): Index of the vertex (0 to 3).
+            target_waypoint_idx (int): Index of the taregt waypoint
 
         Returns:
             float: The distance between the vehicle position and the specified vertex.
         """
         # Ensure valid vertex index
-        if vertex_index < 0 or vertex_index > 3:
+        if target_waypoint_idx < 0 or target_waypoint_idx > 3:
             self.logger.error("Invalid vertex index. It must be between 0 and 3.")
             return None
 
         # Get coordinates of the specified vertex
-        vertex = self.trajectory_waypoints[vertex_index]
+        target_waypoint = self.trajectory_waypoints[target_waypoint_idx]
 
         # Calculate distance using Euclidean distance formula
-        dx = self.vehicle_position[0] - vertex[0]
-        dy = self.vehicle_position[1] - vertex[1]
-        dz = self.vehicle_position[2] - vertex[2]
+        dx = self.vehicle_position[0] - target_waypoint[0]
+        dy = self.vehicle_position[1] - target_waypoint[1]
+        dz = self.vehicle_position[2] - target_waypoint[2]
         distance = math.sqrt(dx**2 + dy**2 + dz**2)
 
         return distance
