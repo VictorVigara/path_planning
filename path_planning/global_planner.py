@@ -46,7 +46,8 @@ class GlobalPlanner(Node):
         self.RRT_search_space_range_x = (0, 5)
         self.RRT_search_space_range_y = (-5, 5)
         self.RRT_search_space_range_z = (0, 5)
-        self.RRT_goal = (5, 0.3, 1)
+        self.RRT_goal = (5, 1.5, 1)
+        self.RRT_initial = (0, 0, 2)
         self.RRT_q = 0.2  # length of tree edges
         self.RRT_r = 1  # length of smallest edge to check for intersection with obstacles
         self.RRT_max_samples = 3000  # max number of samples to take before timing out
@@ -103,13 +104,15 @@ class GlobalPlanner(Node):
         self.vehicle_position = [0.0, 0.0, 0.0]
 
         # Trajectory
+        self.trajectory_waypoints = [self.RRT_initial]
         #self.trajectory_waypoints = square_vertices(self.square_side, self.square_height)
-        self.trajectory_waypoints = [[0.0, 0.0, 1.0], [1.0, 0.0, 1.0]]
+        #self.trajectory_waypoints = [[0.0, 0.0, 1.0], [1.0, 0.0, 1.0]]
         self.wayp_idx = 0
+        self.RRT_solved = False
+        self.once = True
 
         if self.mode == 'RRT': 
             self.get_logger().info("Initializing RRT")
-            self.get_logger().info("")
             X_dimensions = np.array([self.RRT_search_space_range_x, self.RRT_search_space_range_y, self.RRT_search_space_range_z])
             # Create search space
             self.X = SearchSpace(X_dimensions)
@@ -136,7 +139,7 @@ class GlobalPlanner(Node):
 
             self.save_pc2_octomap = False
         
-        pc2_cropped = PointCloud2()
+        """ pc2_cropped = PointCloud2()
         pc2_cropped.header = pointcloud.header
         pc2_cropped.height = 1
         pc2_cropped.width = len(self.octomap_occupied_pointcloud)
@@ -147,7 +150,7 @@ class GlobalPlanner(Node):
         pc2_cropped.point_step = 12  # 4 (x) + 4 (y) + 4 (z) bytes per point
         pc2_cropped.row_step = pc2_cropped.point_step * len(self.octomap_occupied_pointcloud)
         pc2_cropped.data = np.array(self.octomap_occupied_pointcloud, dtype=np.float32).tobytes()
-        self.pc2_pub.publish(pc2_cropped)
+        self.pc2_pub.publish(pc2_cropped) """
 
         self.octomap_received = True
 
@@ -177,15 +180,14 @@ class GlobalPlanner(Node):
 
     def waypoint_callback(self): 
         # When octomap received, calculate RRT
-        once = True
-        if self.octomap_received and once: 
+        if self.octomap_received and self.once: 
             self.get_logger().info("Inserting octomap as RRT obstacles")
             # Convert octomap occupied pointcloud in obstacles
             self.obstacles = self.octomap_pc2_to_obstacle()
             # Insert obstacles in search space
             for obstacle in self.obstacles: 
                 self.X.obs.insert(uuid.uuid4().int, tuple(obstacle), tuple(obstacle))
-            rrt = RRT(self.X, self.RRT_q, tuple(self.vehicle_position), self.RRT_goal, self.RRT_max_samples, self.RRT_r, self.RRT_prc)
+            rrt = RRT(self.X, self.RRT_q, self.RRT_initial, self.RRT_goal, self.RRT_max_samples, self.RRT_r, self.RRT_prc)
             path = rrt.rrt_search()
             self.get_logger().info(f"Path RRT: {path}")
             self.octomap_received = False
@@ -193,24 +195,27 @@ class GlobalPlanner(Node):
             for waypoint in path: 
                 pose_msg = self.vector2PoseMsg('odom', waypoint)
                 self.vehicle_path_msg.poses.append(pose_msg)
+                self.trajectory_waypoints.append(waypoint)
 
+            self.n_waypoints = len(self.trajectory_waypoints)
             self.vehicle_path_pub.publish(self.vehicle_path_msg)
-            once = False
+            self.once = False
+            self.RRT_solved = True
 
+        elif self.RRT_solved: 
+            target_distance = self.distance_to_target(self.wayp_idx)
+            self.get_logger().info(f"Distance to next waypoint {target_distance} m")
 
-        """ target_distance = self.distance_to_target(self.wayp_idx)
-        self.get_logger().info(f"Distance to next waypoint {target_distance} m")
+            if target_distance < 0.3: 
+                if self.wayp_idx == (self.n_waypoints - 1): 
+                    self.wayp_idx = 0
+                    self.RRT_solved = False
+                else:
+                    self.wayp_idx += 1
 
-        if target_distance < 0.3: 
-            time.sleep(10)
-            if self.wayp_idx == 3: 
-                self.wayp_idx = 0
-            else:
-                self.wayp_idx += 1
-
-        target_waypoint = self.trajectory_waypoints[self.wayp_idx]
-        wayp_msg = self.create_waypoint_msg(target_waypoint[0], target_waypoint[1], target_waypoint[2])
-        self.waypoint_publisher.publish(wayp_msg) """
+            target_waypoint = self.trajectory_waypoints[self.wayp_idx]
+            wayp_msg = self.create_waypoint_msg(target_waypoint[0], target_waypoint[1], target_waypoint[2])
+            self.waypoint_publisher.publish(wayp_msg)
 
     def create_waypoint_msg(self, x, y, z):
         waypoint_msg = Vector3Stamped()
@@ -218,9 +223,9 @@ class GlobalPlanner(Node):
         waypoint_msg.header.stamp = self.get_clock().now().to_msg()
         waypoint_msg.header.frame_id = 'base_link'
 
-        waypoint_msg.vector.x = x
-        waypoint_msg.vector.y = y
-        waypoint_msg.vector.z = z 
+        waypoint_msg.vector.x = float(x)
+        waypoint_msg.vector.y = float(y)
+        waypoint_msg.vector.z = float(z) 
         
         return waypoint_msg
     
@@ -235,7 +240,7 @@ class GlobalPlanner(Node):
             float: The distance between the vehicle position and the specified vertex.
         """
         # Ensure valid vertex index
-        if target_waypoint_idx < 0 or target_waypoint_idx > 3:
+        if target_waypoint_idx < 0 or target_waypoint_idx == self.n_waypoints:
             self.logger.error("Invalid vertex index. It must be between 0 and 3.")
             return None
 
