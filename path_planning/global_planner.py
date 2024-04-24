@@ -15,7 +15,6 @@ from sensor_msgs_py import point_cloud2
 from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleCommand, VehicleLocalPosition, VehicleStatus
 from nav_msgs.msg import Path
 
-#from .trajectory_generation.square_trajectory import square_vertices
 from .trajectory_generation.rrt_algorithms.rrt.rrt import RRT
 from .trajectory_generation.rrt_algorithms.rrt.rrt_star import RRTStar
 from .trajectory_generation.rrt_algorithms.rrt.rrt_connect import RRTConnect
@@ -33,21 +32,17 @@ class GlobalPlanner(Node):
         super().__init__('global_planner')
 
         ### Parameters ###########################################
-        self.mode = 'RRT'  # 'square' sends a square trajectory
-
-        # Square traj params
-        self.square_side = 4.0
-        self.square_height = 1.0
+        self.mode = 'RRT'  
 
         # Octomap 
-        self.octomap_resolution = 0.1
+        self.octomap_resolution = 0.6
 
         # RRT
-        self.RRT_search_space_range_x = (0, 5)
+        self.RRT_search_space_range_x = (-1, 5)
         self.RRT_search_space_range_y = (-5, 5)
         self.RRT_search_space_range_z = (0, 5)
         self.RRT_goal = (5, 1.5, 1)
-        self.RRT_initial = (0, 0, 2)
+        self.RRT_initial = (0, 0, 1)
         self.RRT_q = 0.2  # length of tree edges
         self.RRT_r = 1  # length of smallest edge to check for intersection with obstacles
         self.RRT_max_samples = 3000  # max number of samples to take before timing out
@@ -105,11 +100,9 @@ class GlobalPlanner(Node):
 
         # Trajectory
         self.trajectory_waypoints = [self.RRT_initial]
-        #self.trajectory_waypoints = square_vertices(self.square_side, self.square_height)
-        #self.trajectory_waypoints = [[0.0, 0.0, 1.0], [1.0, 0.0, 1.0]]
         self.wayp_idx = 0
         self.RRT_solved = False
-        self.once = True
+        self.goal_reached = False
 
         if self.mode == 'RRT': 
             self.get_logger().info("Initializing RRT")
@@ -180,7 +173,7 @@ class GlobalPlanner(Node):
 
     def waypoint_callback(self): 
         # When octomap received, calculate RRT
-        if self.octomap_received and self.once: 
+        if self.octomap_received and not self.RRT_solved: 
             self.get_logger().info("Inserting octomap as RRT obstacles")
             # Convert octomap occupied pointcloud in obstacles
             self.obstacles = self.octomap_pc2_to_obstacle()
@@ -192,6 +185,9 @@ class GlobalPlanner(Node):
             self.get_logger().info(f"Path RRT: {path}")
             self.octomap_received = False
 
+            self.vehicle_path_msg.header.frame_id = 'odom'
+            self.vehicle_path_msg.header.stamp = self.get_clock().now().to_msg()
+
             for waypoint in path: 
                 pose_msg = self.vector2PoseMsg('odom', waypoint)
                 self.vehicle_path_msg.poses.append(pose_msg)
@@ -199,17 +195,19 @@ class GlobalPlanner(Node):
 
             self.n_waypoints = len(self.trajectory_waypoints)
             self.vehicle_path_pub.publish(self.vehicle_path_msg)
-            self.once = False
             self.RRT_solved = True
 
-        elif self.RRT_solved: 
+        elif self.RRT_solved and self.goal_reached == False: 
             target_distance = self.distance_to_target(self.wayp_idx)
             self.get_logger().info(f"Distance to next waypoint {target_distance} m")
 
-            if target_distance < 0.3: 
+            if target_distance < 0.1: 
+                time.sleep(1)
                 if self.wayp_idx == (self.n_waypoints - 1): 
-                    self.wayp_idx = 0
-                    self.RRT_solved = False
+                    a = 1
+                    #self.wayp_idx = 0
+                    #self.RRT_solved = False
+                    #self.goal_reached = True
                 else:
                     self.wayp_idx += 1
 
