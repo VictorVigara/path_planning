@@ -1,2 +1,6 @@
 path_planning/__pycache__/
 path_planning/trajectory_generation/__pycache__/
+path_planning/trajectory_generation/rrt_algorithms/__pycache__/
+path_planning/trajectory_generation/rrt_algorithms/rrt/__pycache__/
+path_planning/trajectory_generation/rrt_algorithms/search_space/__pycache__/
+path_planning/trajectory_generation/rrt_algorithms/utilities/__pycache__/
