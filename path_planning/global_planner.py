@@ -38,10 +38,10 @@ class GlobalPlanner(Node):
         self.octomap_resolution = 1.0
 
         # RRT
-        self.RRT_search_space_range_x = (-1, 5)
-        self.RRT_search_space_range_y = (-4, 4)
-        self.RRT_search_space_range_z = (0, 2)
-        self.RRT_goal = (5, 1.6, 1)
+        self.RRT_search_space_range_x = (-1, 15)
+        self.RRT_search_space_range_y = (-7, 7)
+        self.RRT_search_space_range_z = (0, 3)
+        self.RRT_goal = (13, 7, 1)
         self.RRT_initial = (0, 0, 1)
         self.RRT_q = 0.3  # length of tree edges
         self.RRT_r = 1  # length of smallest edge to check for intersection with obstacles
@@ -185,7 +185,7 @@ class GlobalPlanner(Node):
             self.get_logger().info(f"Path RRT: {path} ")
             self.octomap_received = False
 
-            self.vehicle_path_msg.header.frame_id = 'odom'
+            self.vehicle_path_msg.header.frame_id = 'livox_frame'
             self.vehicle_path_msg.header.stamp = self.get_clock().now().to_msg()
 
             self.n_waypoints = len(path)
@@ -214,6 +214,8 @@ class GlobalPlanner(Node):
                                             (steered_wayp[2]-last_waypoint[2])**2
                                              )
                 print(f"last_dist: {last_distance}")
+                pose_msg = self.vector2PoseMsg('odom', steered_wayp)
+                self.vehicle_path_msg.poses.append(pose_msg)
                 if last_distance > self.RRT_q:
                     penultimate_waypoint = steered_wayp
                     self.trajectory_waypoints.append(penultimate_waypoint)
@@ -240,6 +242,7 @@ class GlobalPlanner(Node):
 
             target_waypoint = self.trajectory_waypoints[self.wayp_idx]
             wayp_msg = self.create_waypoint_msg(target_waypoint[0], target_waypoint[1], target_waypoint[2])
+            self.vehicle_path_pub.publish(self.vehicle_path_msg)
             self.waypoint_publisher.publish(wayp_msg)
 
     def create_waypoint_msg(self, x, y, z):
