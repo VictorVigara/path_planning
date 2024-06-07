@@ -1,0 +1,33 @@
+default_language_version:
+  python: python3
+
+repos:
+  - repo: https://github.com/myint/autoflake
+    rev: v1.4
+    hooks:
+      - id: autoflake
+        name: autoflake
+        entry: autoflake
+        language: python
+        args:
+          - "--in-place"
+          - "--remove-unused-variables"
+          - "--remove-all-unused-imports"
+          - "--ignore-init-module-imports"
+          - "--exclude=typing.py,env,venv"
+          - "--recursive"
+        files: \.py$
+  - repo: https://github.com/timothycrosley/isort
+    rev: 5.12.0
+    hooks:
+      - id: isort
+  - repo: https://github.com/ambv/black
+    rev: 22.3.0
+    hooks:
+      - id: black
+        language: python
+  - repo: https://github.com/pycqa/bandit
+    rev: 1.6.2
+    hooks:
+      - id: bandit
+        args: ['-iii', '-ll']
