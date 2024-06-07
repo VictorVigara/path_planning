@@ -249,6 +249,8 @@ class GlobalPlanner(Node):
                     + (steered_wayp[2] - last_waypoint[2]) ** 2
                 )
                 print(f"last_dist: {last_distance}")
+                pose_msg = self.vector2PoseMsg("odom", steered_wayp)
+                self.vehicle_path_msg.poses.append(pose_msg)
                 if last_distance > self.RRT_q:
                     penultimate_waypoint = steered_wayp
                     self.trajectory_waypoints.append(penultimate_waypoint)
