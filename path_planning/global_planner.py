@@ -32,7 +32,7 @@ class GlobalPlanner(Node):
         self.mode = "RRT_star"
 
         # Octomap
-        self.octomap_resolution = 0.12  # Octomap resolution is 0.1, but when inserted in search space with the same
+        self.octomap_resolution = 0.6  # Octomap resolution is 0.1, but when inserted in search space with the same
                                         # resolution, there could be small spaces that could led to paths between the obstacle. 
                                         # So, the seacrh space is set up with a bit of lower resolution to fill the gaps.
 
@@ -40,7 +40,7 @@ class GlobalPlanner(Node):
         self.RRT_search_space_range_x = (-1, 5)
         self.RRT_search_space_range_y = (-4, 4)
         self.RRT_search_space_range_z = (0, 2)
-        self.RRT_goal = (5, 1.6, 1)
+        self.RRT_goal = (5, 0, 2)
         self.RRT_initial = (0, 0, 1)
         self.RRT_q = 0.3  # length of tree edges
         self.RRT_r = (
@@ -115,7 +115,7 @@ class GlobalPlanner(Node):
         self.vehicle_position = [0.0, 0.0, 0.0]
 
         # Trajectory
-        self.trajectory_waypoints = [self.RRT_initial]
+        self.trajectory_waypoints = []
         self.wayp_idx = 0
         self.goal_reached = False
         self.initial_RRT_solved = False
@@ -223,7 +223,8 @@ class GlobalPlanner(Node):
             # Calculates initial RRT
             if not self.initial_RRT_solved:
                 self.get_logger().info("Solving 1st RRT ...")
-                self.solve_RRT()
+                self.trajectory_waypoints = self.solve_RRT(initial_waypoint=self.RRT_initial)
+                self.get_logger().info(f"Initial Path RRT: {self.trajectory_waypoints}")
                 self.initial_RRT_solved = True
             else:
                 #self.get_logger().info("Checking for collisions ...")
@@ -232,10 +233,10 @@ class GlobalPlanner(Node):
                 # self.collision = True
                 previous_wayp = self.trajectory_waypoints[
                     : self.wayp_idx
-                ]  # Waypoints already done
+                ].copy()  # Waypoints already done
                 wayp_to_check = self.trajectory_waypoints[
                     self.wayp_idx :
-                ]  # Following waypoints to check a possible collision
+                ].copy()  # Following waypoints to check a possible collision
                 for idx in range(len(wayp_to_check) - 1):
                     if not self.X.collision_free(
                         wayp_to_check[idx], wayp_to_check[idx + 1], self.RRT_r
@@ -246,17 +247,21 @@ class GlobalPlanner(Node):
                 if self.collision:
 
                     # TODO: Recalculate a path between the previous waypoint without collision and the goal
-                    self.RRT_initial = (
+                    initial_recalculated = (
                         self.trajectory_waypoints[self.wayp_idx][0],
                         self.trajectory_waypoints[self.wayp_idx][1],
                         self.trajectory_waypoints[self.wayp_idx][2],
                     )
-                    self.get_logger().info(f"RRT_initial: {self.RRT_initial}")
+                    self.get_logger().info(f"RRT_initial: {initial_recalculated}")
                     print(self.RRT_initial)
-                    self.solve_RRT()
-                    self.trajectory_waypoints = (
-                        previous_wayp + self.trajectory_waypoints
-                    )
+                    recalculated_path = self.solve_RRT(initial_waypoint=initial_recalculated)
+                    self.get_logger().info(f"Path already done: {previous_wayp}")
+                    self.get_logger().info(f"Path recalculated: {recalculated_path}")
+                    self.trajectory_waypoints = previous_wayp + recalculated_path
+                    self.get_logger().info(f"Global path updated: {self.trajectory_waypoints}")
+                    self.collision = False
+
+            self.octomap_received = False
 
             # self.get_logger().info("Inserting octomap as RRT obstacles")
             # Convert octomap occupied pointcloud in obstacles
@@ -291,12 +296,13 @@ class GlobalPlanner(Node):
             )
             self.waypoint_publisher.publish(wayp_msg)
 
-    def solve_RRT(self):
+    def solve_RRT(self, initial_waypoint):
+        traj_wayp = []
         initial_rrt_time = time.time()
         rrt = RRT(
             self.X,
             self.RRT_q,
-            self.RRT_initial,
+            initial_waypoint,
             self.RRT_goal,
             self.RRT_max_samples,
             self.RRT_r,
@@ -306,7 +312,6 @@ class GlobalPlanner(Node):
         final_time = time.time()
         self.get_logger().info(f"RRT solved in {(final_time-initial_rrt_time)*1000} ms")
         # self.get_logger().info(f"Path RRT: {path} ")
-        self.octomap_received = False
 
         self.vehicle_path_msg.header.frame_id = "odom"
         self.vehicle_path_msg.header.stamp = self.get_clock().now().to_msg()
@@ -319,7 +324,7 @@ class GlobalPlanner(Node):
             if idx < (self.n_waypoints - 1):
                 pose_msg = self.vector2PoseMsg("odom", waypoint)
                 self.vehicle_path_msg.poses.append(pose_msg)
-                self.trajectory_waypoints.append(waypoint)
+                traj_wayp.append(waypoint)
                 dist_next = np.sqrt(
                     (path[idx][0] - path[idx + 1][0]) ** 2
                     + (path[idx][1] - path[idx + 1][1]) ** 2
@@ -344,16 +349,18 @@ class GlobalPlanner(Node):
             self.vehicle_path_msg.poses.append(pose_msg)
             if last_distance > self.RRT_q:
                 penultimate_waypoint = steered_wayp
-                self.trajectory_waypoints.append(penultimate_waypoint)
+                traj_wayp.append(penultimate_waypoint)
             else:
-                self.trajectory_waypoints.append(last_waypoint)
+                traj_wayp.append(last_waypoint)
 
         # save  initial solution, because trajectory waypoints will change with replanning
-        self.global_trajectory_waypoints = self.trajectory_waypoints.copy()
-        self.n_waypoints = len(self.trajectory_waypoints)
-        # self.get_logger().info(f"Steered Path RRT: {self.trajectory_waypoints}")
+        self.global_trajectory_waypoints = traj_wayp.copy()
+        self.n_waypoints = len(traj_wayp)
+        # self.get_logger().info(f"Steered Path RRT: {traj_wayp}")
 
         self.vehicle_path_pub.publish(self.vehicle_path_msg)
+
+        return traj_wayp
 
     def create_waypoint_msg(self, x, y, z):
         waypoint_msg = Vector3Stamped()
