@@ -14,6 +14,7 @@ from sensor_msgs.msg import PointCloud2, PointField
 from sensor_msgs_py import point_cloud2
 
 from .trajectory_generation.rrt_algorithms.rrt.rrt import RRT
+from .trajectory_generation.rrt_algorithms.rrt.rrt_star import RRTStar
 from .trajectory_generation.rrt_algorithms.search_space.search_space import SearchSpace
 from .trajectory_generation.rrt_algorithms.utilities.geometry import steer
 
@@ -24,23 +25,28 @@ class VehicleCommandMapping:
     VEHICLE_CMD_DO_SET_MODE = 176
 
 
+class RRT_Mode:
+    RRT = "rrt"
+    RRT_STAR = "rrt_star"
+
+
 class GlobalPlanner(Node):
     def __init__(self) -> None:
         super().__init__("global_planner")
 
         ### Parameters ###########################################
-        self.mode = "RRT_star"
+        self.mode = RRT_Mode.RRT_STAR
 
         # Octomap
         self.octomap_resolution = 0.6  # Octomap resolution is 0.1, but when inserted in search space with the same
-                                        # resolution, there could be small spaces that could led to paths between the obstacle. 
-                                        # So, the seacrh space is set up with a bit of lower resolution to fill the gaps.
+        # resolution, there could be small spaces that could led to paths between the obstacle.
+        # So, the seacrh space is set up with a bit of lower resolution to fill the gaps.
 
         # RRT
         self.RRT_search_space_range_x = (-1, 5)
         self.RRT_search_space_range_y = (-4, 4)
-        self.RRT_search_space_range_z = (0, 2)
-        self.RRT_goal = (5, 0, 2)
+        self.RRT_search_space_range_z = (1, 1.5)
+        self.RRT_goal = (5, 0, 1.5)
         self.RRT_initial = (0, 0, 1)
         self.RRT_q = 0.3  # length of tree edges
         self.RRT_r = (
@@ -223,11 +229,13 @@ class GlobalPlanner(Node):
             # Calculates initial RRT
             if not self.initial_RRT_solved:
                 self.get_logger().info("Solving 1st RRT ...")
-                self.trajectory_waypoints = self.solve_RRT(initial_waypoint=self.RRT_initial)
+                self.trajectory_waypoints = self.solve_RRT(
+                    initial_waypoint=self.RRT_initial
+                )
                 self.get_logger().info(f"Initial Path RRT: {self.trajectory_waypoints}")
                 self.initial_RRT_solved = True
             else:
-                #self.get_logger().info("Checking for collisions ...")
+                # self.get_logger().info("Checking for collisions ...")
                 # Check previous RRT solution new octomap collisions
                 # TODO: Check for collision with the new map update
                 # self.collision = True
@@ -254,11 +262,16 @@ class GlobalPlanner(Node):
                     )
                     self.get_logger().info(f"RRT_initial: {initial_recalculated}")
                     print(self.RRT_initial)
-                    recalculated_path = self.solve_RRT(initial_waypoint=initial_recalculated)
+                    recalculated_path = self.solve_RRT(
+                        initial_waypoint=initial_recalculated
+                    )
                     self.get_logger().info(f"Path already done: {previous_wayp}")
                     self.get_logger().info(f"Path recalculated: {recalculated_path}")
-                    self.trajectory_waypoints = previous_wayp + recalculated_path
-                    self.get_logger().info(f"Global path updated: {self.trajectory_waypoints}")
+                    self.trajectory_waypoints = recalculated_path
+                    self.wayp_idx = 0
+                    self.get_logger().info(
+                        f"Global path updated: {self.trajectory_waypoints}"
+                    )
                     self.collision = False
 
             self.octomap_received = False
@@ -299,16 +312,31 @@ class GlobalPlanner(Node):
     def solve_RRT(self, initial_waypoint):
         traj_wayp = []
         initial_rrt_time = time.time()
-        rrt = RRT(
-            self.X,
-            self.RRT_q,
-            initial_waypoint,
-            self.RRT_goal,
-            self.RRT_max_samples,
-            self.RRT_r,
-            self.RRT_prc,
-        )
-        path = rrt.rrt_search()
+
+        if self.mode == RRT_Mode.RRT:
+            self.get_logger().info("Solving RRT")
+            rrt = RRT(
+                self.X,
+                self.RRT_q,
+                initial_waypoint,
+                self.RRT_goal,
+                self.RRT_max_samples,
+                self.RRT_r,
+                self.RRT_prc,
+            )
+        elif self.mode == RRT_Mode.RRT_STAR:
+            self.get_logger().info("Solving RRT STAR")
+            rrt = RRTStar(
+                self.X,
+                self.RRT_q,
+                initial_waypoint,
+                self.RRT_goal,
+                self.RRT_max_samples,
+                self.RRT_r,
+                self.RRT_prc,
+                self.RRT_rewire_count,
+            )
+        path = rrt.rrt_star()
         final_time = time.time()
         self.get_logger().info(f"RRT solved in {(final_time-initial_rrt_time)*1000} ms")
         # self.get_logger().info(f"Path RRT: {path} ")
