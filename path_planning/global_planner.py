@@ -394,7 +394,7 @@ class GlobalPlanner(Node):
         waypoint_msg = Vector3Stamped()
 
         waypoint_msg.header.stamp = self.get_clock().now().to_msg()
-        waypoint_msg.header.frame_id = "base_link"
+        waypoint_msg.header.frame_id = "odom"
 
         waypoint_msg.vector.x = float(x)
         waypoint_msg.vector.y = float(y)
