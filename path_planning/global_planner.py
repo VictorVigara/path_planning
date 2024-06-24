@@ -37,6 +37,9 @@ class GlobalPlanner(Node):
         ### Parameters ###########################################
         self.mode = RRT_Mode.RRT_STAR
 
+        # Use octomap
+        self.use_octomap = True
+
         # Octomap
         self.octomap_resolution = 0.65  # Octomap resolution is 0.1, but when inserted in search space with the same
         # resolution, there could be small spaces that could led to paths between the obstacle.
@@ -125,7 +128,7 @@ class GlobalPlanner(Node):
         self.wayp_idx = 0
         self.goal_reached = False
         self.initial_RRT_solved = False
-        self.collision = False
+        self.octomap_collision = False
 
         self.get_logger().info("Initializing RRT search space")
         self.X_dimensions = np.array(
@@ -225,7 +228,7 @@ class GlobalPlanner(Node):
 
     def waypoint_callback(self):
 
-        if self.octomap_received:
+        if self.octomap_received and self.use_octomap:
             # Calculates initial RRT
             if not self.initial_RRT_solved:
                 self.get_logger().info("Solving 1st RRT ...")
@@ -247,7 +250,7 @@ class GlobalPlanner(Node):
                 # self.get_logger().info("Checking for collisions ...")
                 # Check previous RRT solution new octomap collisions
                 # TODO: Check for collision with the new map update
-                # self.collision = True
+                # self.octomap_collision = True
                 previous_wayp = self.trajectory_waypoints[
                     : self.wayp_idx
                 ].copy()  # Waypoints already done
@@ -259,9 +262,9 @@ class GlobalPlanner(Node):
                         wayp_to_check[idx], wayp_to_check[idx + 1], self.RRT_r
                     ):
                         self.get_logger().info(f"Collision detected in wayp {idx}")
-                        self.collision = True
+                        self.octomap_collision = True
                         break
-                if self.collision:
+                if self.octomap_collision:
 
                     # TODO: Recalculate a path between the previous waypoint without collision and the goal
                     initial_recalculated = (
@@ -290,7 +293,7 @@ class GlobalPlanner(Node):
                         self.get_logger().info(
                             f"Global path updated: {self.trajectory_waypoints}"
                         )
-                        self.collision = False
+                        self.octomap_collision = False
 
             self.octomap_received = False
 
@@ -305,7 +308,7 @@ class GlobalPlanner(Node):
                     pass
                     # self.wayp_idx = 0
                     # self.goal_reached = True
-                elif self.collision == False:
+                elif self.octomap_collision == False:
                     self.wayp_idx += 1
                     self.get_logger().info(f"Current target waypoint {self.wayp_idx}")
 
