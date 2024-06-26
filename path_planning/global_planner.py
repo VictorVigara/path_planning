@@ -12,6 +12,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import PointCloud2, PointField
 from sensor_msgs_py import point_cloud2
+from std_msgs.msg import Float32MultiArray
 
 from .trajectory_generation.rrt_algorithms.rrt.rrt import RRT
 from .trajectory_generation.rrt_algorithms.rrt.rrt_star import RRTStar
@@ -41,7 +42,7 @@ class GlobalPlanner(Node):
         self.use_octomap = True
 
         # Octomap
-        self.octomap_resolution = 0.65  # Octomap resolution is 0.1, but when inserted in search space with the same
+        self.octomap_resolution = 0.8  # Octomap resolution is 0.1, but when inserted in search space with the same
         # resolution, there could be small spaces that could led to paths between the obstacle.
         # So, the seacrh space is set up with a bit of lower resolution to fill the gaps.
 
@@ -95,6 +96,10 @@ class GlobalPlanner(Node):
             PointCloud2, "/octomap_point_cloud_centers", self.octomap_pc2_callback, 10
         )
 
+        self.contact_detection_sub = self.create_subscription(
+            Float32MultiArray, "/collision_detection", self.contact_callback, 10
+        )
+
         ### Publishers ###
         self.waypoint_publisher = self.create_publisher(
             Vector3Stamped, "/global_waypoint", qos_profile
@@ -129,6 +134,13 @@ class GlobalPlanner(Node):
         self.goal_reached = False
         self.initial_RRT_solved = False
         self.octomap_collision = False
+        # Platform collision variables
+        self.platform_collision = False  # Set to True when collision detected
+        self.collision_recovering = (
+            False  # set to True when previous waypoint sent and not reached
+        )
+        # Once previous waypoint has been reached, it will be set to False, so
+        # If still collision, go ot the previous waypoint again
 
         self.get_logger().info("Initializing RRT search space")
         self.X_dimensions = np.array(
@@ -143,6 +155,21 @@ class GlobalPlanner(Node):
 
         self.logger = self.get_logger()
         self.logger.info("Global planner node initialized")
+
+    def contact_callback(self, contact_msg: Float32MultiArray) -> None:
+        collision = contact_msg.data[0]
+        if collision == 0.0:
+            self.platform_collision = False
+        elif collision == 1.0:
+            self.platform_collision = True
+
+        self.platform_collision_orientation = contact_msg.data[1]
+        self.platform_collision_displacement = contact_msg.data[2]
+
+        if self.platform_collision and self.collision_recovering == False:
+            self.get_logger().info(
+                f"Receiving collision from {self.platform_collision_orientation} - {self.platform_collision_displacement} cm"
+            )
 
     def octomap_pc2_callback(self, pointcloud: PointCloud2) -> None:
         # self.get_logger().info("Octomap pointcloud received")
@@ -297,11 +324,21 @@ class GlobalPlanner(Node):
 
             self.octomap_received = False
 
+        if self.platform_collision:
+            ## TODO: Create a new platform collision object space to sum it up with the octomap space
+            ## TODO: Logic to handle platform collision and go one waypoint back and include
+            ##      the collision in the map.
+            pass
+
         if self.initial_RRT_solved and self.goal_reached == False:
+
+            # If collision detected, go to the  previous waypoint
+            if self.platform_collision and self.collision_recovering == False:
+                if self.wayp_idx != 0:
+                    self.wayp_idx -= 1
+                    # REcovery flag to not go to another previous waypoint while recovering
+                    self.collision_recovering = True
             target_distance = self.distance_to_target(self.wayp_idx)
-            """ self.get_logger().info(
-                f"Distance to next waypoint {target_distance} m. {self.wayp_idx} idx"
-            ) """
 
             if target_distance < 0.1:
                 if self.wayp_idx == (self.n_waypoints - 1):
@@ -310,6 +347,8 @@ class GlobalPlanner(Node):
                     # self.goal_reached = True
                 elif self.octomap_collision == False:
                     self.wayp_idx += 1
+                    # Recover collision when previous target waypoint reached
+                    self.collision_recovering = False
                     self.get_logger().info(f"Current target waypoint {self.wayp_idx}")
 
             target_waypoint = self.trajectory_waypoints[self.wayp_idx]
