@@ -42,7 +42,7 @@ class GlobalPlanner(Node):
         self.use_octomap = True
 
         # Octomap
-        self.octomap_resolution = 0.8  # Octomap resolution is 0.1, but when inserted in search space with the same
+        self.octomap_resolution = 0.7  # Octomap resolution is 0.1, but when inserted in search space with the same
         # resolution, there could be small spaces that could led to paths between the obstacle.
         # So, the seacrh space is set up with a bit of lower resolution to fill the gaps.
 
@@ -50,7 +50,7 @@ class GlobalPlanner(Node):
         self.RRT_search_space_range_x = (-1, 5)
         self.RRT_search_space_range_y = (-4, 4)
         self.RRT_search_space_range_z = (1, 1.5)
-        self.RRT_goal = (5, 0, 1.5)
+        self.RRT_goal = (4, -2, 1.5)
         self.RRT_initial = (0, 0, 1)
         self.RRT_q = 0.3  # length of tree edges
         self.RRT_r = (
@@ -78,11 +78,18 @@ class GlobalPlanner(Node):
         )
 
         ### Subscribers ###
-        self.vehicle_local_position_subscriber = self.create_subscription(
-            VehicleLocalPosition,
-            "/fmu/out/vehicle_local_position",
-            self.vehicle_local_position_callback,
-            qos_profile,
+        # self.vehicle_local_position_subscriber = self.create_subscription(
+        #     VehicleLocalPosition,
+        #     "/fmu/out/vehicle_local_position",
+        #     self.vehicle_local_position_callback,
+        #     qos_profile,
+        # )
+
+        self.ekf2_px4_pos_sub = self.create_subscription(
+            PoseStamped, 
+            '/px4_ekf_pose', 
+            self.ekf_px4_pose_callback, 
+            1
         )
 
         self.vehicle_command_subscriber = self.create_subscription(
@@ -93,11 +100,11 @@ class GlobalPlanner(Node):
         )
 
         self.octomap_pc2_sub = self.create_subscription(
-            PointCloud2, "/octomap_point_cloud_centers", self.octomap_pc2_callback, 10
+            PointCloud2, "/octomap_point_cloud_centers", self.octomap_pc2_callback, 1
         )
 
         self.contact_detection_sub = self.create_subscription(
-            Float32MultiArray, "/collision_detection", self.contact_callback, 10
+            Float32MultiArray, "/collision_detection", self.contact_callback, 1
         )
 
         ### Publishers ###
@@ -105,9 +112,9 @@ class GlobalPlanner(Node):
             Vector3Stamped, "/global_waypoint", qos_profile
         )
 
-        self.pc2_pub = self.create_publisher(PointCloud2, "read_pc", 10)
+        self.pc2_pub = self.create_publisher(PointCloud2, "read_pc", 1)
 
-        self.vehicle_path_pub = self.create_publisher(Path, "/RRT_path", 10)
+        self.vehicle_path_pub = self.create_publisher(Path, "/RRT_path", 1)
         self.vehicle_path_msg = Path()
 
         ### Timers ###
@@ -156,6 +163,12 @@ class GlobalPlanner(Node):
         self.logger = self.get_logger()
         self.logger.info("Global planner node initialized")
 
+    def ekf_px4_pose_callback(self, ekf_pose_msg: PoseStamped) -> None: 
+        x = ekf_pose_msg.pose.position.x
+        y = ekf_pose_msg.pose.position.y
+        z = ekf_pose_msg.pose.position.z
+        self.vehicle_position = [x, y,z]
+
     def contact_callback(self, contact_msg: Float32MultiArray) -> None:
         collision = contact_msg.data[0]
         if collision == 0.0:
@@ -194,12 +207,12 @@ class GlobalPlanner(Node):
                 obstacle = self.point_to_obstacle([x, y, z])
                 self.X.obs.insert(uuid.uuid4().int, tuple(obstacle), tuple(obstacle))
                 # self.obstacles.append(obstacle)
-                self.octomap_occupied_pointcloud.append([x, y, z])
+                """ self.octomap_occupied_pointcloud.append([x, y, z]) """
         pc_final_time = time.time()
-        #self.get_logger().info(f"Ptcloud: {len(self.octomap_occupied_pointcloud)}")
+        #self.get_logger().info(f"Fill search space: {(pc_final_time-init_ss_time)*1000}")
 
         # self.get_logger().info(f"Ptcloud callback time: {(pc_final_time-pc_init_time)*1000}")
-        if self.save_pc2_octomap:
+        """ if self.save_pc2_octomap:
             with open("pc2_octomap_list", "wb") as fp:  # Pickling
                 pickle.dump(self.octomap_occupied_pointcloud, fp)
 
@@ -226,18 +239,18 @@ class GlobalPlanner(Node):
         pc2_cropped.data = np.array(
             self.octomap_occupied_pointcloud, dtype=np.float32
         ).tobytes()
-        self.pc2_pub.publish(pc2_cropped)
+        self.pc2_pub.publish(pc2_cropped) """
 
         self.octomap_received = True
 
-    def vehicle_local_position_callback(self, vehicle_local_position):
-        """Callback function for vehicle_local_position topic subscriber."""
-        # Convert NED (px4) to ENU (ROS)
-        x = vehicle_local_position.y
-        y = vehicle_local_position.x
-        z = -vehicle_local_position.z
+    # def vehicle_local_position_callback(self, vehicle_local_position):
+    #     """Callback function for vehicle_local_position topic subscriber."""
+    #     # Convert NED (px4) to ENU (ROS)
+    #     x = vehicle_local_position.y
+    #     y = vehicle_local_position.x
+    #     z = -vehicle_local_position.z
 
-        self.vehicle_position = [x, y, z]
+    #     self.vehicle_position = [x, y, z]
 
     def vehicle_command_callback(self, msg):
         self.vehicle_command = msg.command
@@ -278,6 +291,7 @@ class GlobalPlanner(Node):
                 # Check previous RRT solution new octomap collisions
                 # TODO: Check for collision with the new map update
                 # self.octomap_collision = True
+                time_check_i = time.time()
                 previous_wayp = self.trajectory_waypoints[
                     : self.wayp_idx
                 ].copy()  # Waypoints already done
@@ -291,6 +305,9 @@ class GlobalPlanner(Node):
                         self.get_logger().info(f"Collision detected in wayp {idx}")
                         self.octomap_collision = True
                         break
+                time_check_f = time.time()
+
+                #print(f"Time to check collision: {(time_check_f-time_check_i)*1000}")
                 if self.octomap_collision:
 
                     # TODO: Recalculate a path between the previous waypoint without collision and the goal
@@ -339,17 +356,19 @@ class GlobalPlanner(Node):
                     # REcovery flag to not go to another previous waypoint while recovering
                     self.collision_recovering = True
             target_distance = self.distance_to_target(self.wayp_idx)
+            print(f"Curr wayp: {self.wayp_idx} - dist: {target_distance}")
 
             if target_distance < 0.1:
                 if self.wayp_idx == (self.n_waypoints - 1):
                     pass
                     # self.wayp_idx = 0
                     # self.goal_reached = True
-                elif self.octomap_collision == False:
+                elif self.octomap_collision == False and self.platform_collision == False:
                     self.wayp_idx += 1
                     # Recover collision when previous target waypoint reached
                     self.collision_recovering = False
-                    self.get_logger().info(f"Current target waypoint {self.wayp_idx}")
+            
+            self.get_logger().info(f"Current target waypoint {self.wayp_idx}")
 
             target_waypoint = self.trajectory_waypoints[self.wayp_idx]
             wayp_msg = self.create_waypoint_msg(
@@ -394,7 +413,7 @@ class GlobalPlanner(Node):
         self.get_logger().info(f"RRT solved in {(final_time-initial_rrt_time)*1000} ms")
         self.get_logger().info(f"Path RRT: {path} ")
 
-        self.vehicle_path_msg.header.frame_id = "odom"
+        self.vehicle_path_msg.header.frame_id = "world"
         self.vehicle_path_msg.header.stamp = self.get_clock().now().to_msg()
 
         self.n_waypoints = len(path)
@@ -403,7 +422,7 @@ class GlobalPlanner(Node):
         # Save until the penultimate waypoint in trajectory_waypoints
         for idx, waypoint in enumerate(path):
             if idx < (self.n_waypoints - 1):
-                pose_msg = self.vector2PoseMsg("odom", waypoint)
+                pose_msg = self.vector2PoseMsg("world", waypoint)
                 self.vehicle_path_msg.poses.append(pose_msg)
                 traj_wayp.append(waypoint)
                 dist_next = np.sqrt(
@@ -423,7 +442,7 @@ class GlobalPlanner(Node):
                         self.get_logger().info(f"Dist next waypoint: {dist_next}")
                         traj_wayp.append(steered_wayp)
 
-                        pose_msg = self.vector2PoseMsg("odom", steered_wayp)
+                        pose_msg = self.vector2PoseMsg("world", steered_wayp)
                         self.vehicle_path_msg.poses.append(pose_msg)
                         # Update waypoint to continue steering
                         waypoint = steered_wayp
@@ -434,7 +453,7 @@ class GlobalPlanner(Node):
 
         # Append last waypoint to the trajectory
         traj_wayp.append(path[-1])
-        pose_msg = self.vector2PoseMsg("odom", path[-1])
+        pose_msg = self.vector2PoseMsg("world", path[-1])
         self.vehicle_path_msg.poses.append(pose_msg)
 
         self.get_logger().info(f"Final path steered: {traj_wayp}")
@@ -452,7 +471,7 @@ class GlobalPlanner(Node):
         waypoint_msg = Vector3Stamped()
 
         waypoint_msg.header.stamp = self.get_clock().now().to_msg()
-        waypoint_msg.header.frame_id = "odom"
+        waypoint_msg.header.frame_id = "world"
 
         waypoint_msg.vector.x = float(x)
         waypoint_msg.vector.y = float(y)
