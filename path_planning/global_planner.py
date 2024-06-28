@@ -39,7 +39,7 @@ class GlobalPlanner(Node):
         self.mode = RRT_Mode.RRT_STAR
 
         # Use octomap
-        self.use_octomap = True
+        self.use_octomap = False
 
         # Octomap
         self.octomap_resolution = 0.7  # Octomap resolution is 0.1, but when inserted in search space with the same
@@ -164,6 +164,7 @@ class GlobalPlanner(Node):
         self.logger.info("Global planner node initialized")
 
     def ekf_px4_pose_callback(self, ekf_pose_msg: PoseStamped) -> None: 
+        #print("Receiving px4 ekf pose")
         x = ekf_pose_msg.pose.position.x
         y = ekf_pose_msg.pose.position.y
         z = ekf_pose_msg.pose.position.z
@@ -268,6 +269,24 @@ class GlobalPlanner(Node):
 
     def waypoint_callback(self):
 
+        if not self.use_octomap: 
+            if not self.initial_RRT_solved:
+                self.get_logger().info("Solving 1st RRT ...")
+                self.trajectory_waypoints = self.solve_RRT(
+                    initial_waypoint=self.RRT_initial
+                )
+                if self.trajectory_waypoints == None:
+                    self.get_logger().info(
+                        f"Initial Path RRT no solution, will try again"
+                    )
+                    self.initial_RRT_solved = False
+
+                else:
+                    self.get_logger().info(
+                        f"Initial Path RRT: {self.trajectory_waypoints}"
+                    )
+                    self.initial_RRT_solved = True
+
         if self.octomap_received and self.use_octomap:
             # Calculates initial RRT
             if not self.initial_RRT_solved:
@@ -355,8 +374,9 @@ class GlobalPlanner(Node):
                     self.wayp_idx -= 1
                     # REcovery flag to not go to another previous waypoint while recovering
                     self.collision_recovering = True
+                    print(f"Collision previous waypoint {self.wayp_idx}")
             target_distance = self.distance_to_target(self.wayp_idx)
-            print(f"Curr wayp: {self.wayp_idx} - dist: {target_distance}")
+            
 
             if target_distance < 0.1:
                 if self.wayp_idx == (self.n_waypoints - 1):
@@ -365,10 +385,16 @@ class GlobalPlanner(Node):
                     # self.goal_reached = True
                 elif self.octomap_collision == False and self.platform_collision == False:
                     self.wayp_idx += 1
+                    print(f"Next waypoint {self.wayp_idx}")
                     # Recover collision when previous target waypoint reached
                     self.collision_recovering = False
+                elif self.platform_collision == True and self.collision_recovering == True: 
+                    # Set to false so next iteration we will go to previous waypoint
+                    self.collision_recovering = False
+
             
-            self.get_logger().info(f"Current target waypoint {self.wayp_idx}")
+            #self.get_logger().info(f"Current target waypoint {self.wayp_idx}")
+            print(f"Curr wayp: {self.wayp_idx} - dist: {target_distance}")
 
             target_waypoint = self.trajectory_waypoints[self.wayp_idx]
             wayp_msg = self.create_waypoint_msg(
@@ -496,6 +522,9 @@ class GlobalPlanner(Node):
 
         # Get coordinates of the specified vertex
         target_waypoint = self.trajectory_waypoints[target_waypoint_idx]
+
+        # print(f"Vehicle pose: {self.vehicle_position}")
+        # print(f"Target pose: {target_waypoint}")
 
         # Calculate distance using Euclidean distance formula
         dx = self.vehicle_position[0] - target_waypoint[0]
