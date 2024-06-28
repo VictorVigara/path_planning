@@ -41,7 +41,7 @@ class GlobalPlanner(Node):
 
         # Use octomap
         self.use_octomap = False
-        self.use_platform = False
+        self.use_platform = True
 
         # Start taking off or from air
         self.take_off = False   # Take off manually and start planning from current pose in air
@@ -52,12 +52,12 @@ class GlobalPlanner(Node):
         # So, the seacrh space is set up with a bit of lower resolution to fill the gaps.
 
         # RRT
-        self.RRT_search_space_range_x = (-1, 5)
-        self.RRT_search_space_range_y = (-4, 4)
-        self.RRT_search_space_range_z = (1, 1.5)
-        self.RRT_goal = (4.7, 0, 1.5)
+        self.RRT_search_space_range_x = (-2, 3)
+        self.RRT_search_space_range_y = (-2, 2)
+        self.RRT_search_space_range_z = (0.5, 1.5)
+        self.RRT_goal = (3, 0, 1)
         self.RRT_initial = (0, 0, 1)
-        self.RRT_q = 0.05  # length of tree edges
+        self.RRT_q = 0.1  # length of tree edges
         self.RRT_r = (
             0.04  # length of smallest edge to check for intersection with obstacles
         )
@@ -66,7 +66,7 @@ class GlobalPlanner(Node):
         # RRT*
         self.RRT_rewire_count = 32  # optional, number of nearby branches to rewire
 
-        self.save_pc2_octomap = True
+        self.save_pc2_octomap = False
 
         # Octomap pointcloud box filter
         self.x_crop = 0.44
@@ -114,7 +114,7 @@ class GlobalPlanner(Node):
 
         ### Publishers ###
         self.waypoint_publisher = self.create_publisher(
-            Vector3Stamped, "/global_waypoint", qos_profile
+            Vector3Stamped, "/global_waypoint", 1
         )
 
         self.pc2_pub = self.create_publisher(PointCloud2, "read_pc", 1)
@@ -327,39 +327,41 @@ class GlobalPlanner(Node):
         if not self.use_octomap: 
             if not self.initial_RRT_solved:
                 self.get_logger().info("Solving 1st RRT ...")
-                self.trajectory_waypoints = self.solve_RRT(
-                    initial_waypoint=self.RRT_initial
-                )
-                if self.trajectory_waypoints == None:
-                    self.get_logger().info(
-                        f"Initial Path RRT no solution, will try again"
+                if self.vehicle_position != [0.0, 0.0, 0.0]:
+                    self.trajectory_waypoints = self.solve_RRT(
+                        initial_waypoint=self.RRT_initial
                     )
-                    self.initial_RRT_solved = False
+                    if self.trajectory_waypoints == None:
+                        self.get_logger().info(
+                            f"Initial Path RRT no solution, will try again"
+                        )
+                        self.initial_RRT_solved = False
 
-                else:
-                    self.get_logger().info(
-                        f"Initial Path RRT: {self.trajectory_waypoints}"
-                    )
-                    self.initial_RRT_solved = True
+                    else:
+                        self.get_logger().info(
+                            f"Initial Path RRT: {self.trajectory_waypoints}"
+                        )
+                        self.initial_RRT_solved = True
 
         if self.octomap_received and self.use_octomap:
             # Calculates initial RRT
             if not self.initial_RRT_solved:
                 self.get_logger().info("Solving 1st RRT ...")
-                self.trajectory_waypoints = self.solve_RRT(
-                    initial_waypoint=self.RRT_initial
-                )
-                if self.trajectory_waypoints == None:
-                    self.get_logger().info(
-                        f"Initial Path RRT no solution, will try again"
+                if self.vehicle_position != [0.0, 0.0, 0.0]:
+                    self.trajectory_waypoints = self.solve_RRT(
+                        initial_waypoint=self.RRT_initial
                     )
-                    self.initial_RRT_solved = False
+                    if self.trajectory_waypoints == None:
+                        self.get_logger().info(
+                            f"Initial Path RRT no solution, will try again"
+                        )
+                        self.initial_RRT_solved = False
 
-                else:
-                    self.get_logger().info(
-                        f"Initial Path RRT: {self.trajectory_waypoints}"
-                    )
-                    self.initial_RRT_solved = True
+                    else:
+                        self.get_logger().info(
+                            f"Initial Path RRT: {self.trajectory_waypoints}"
+                        )
+                        self.initial_RRT_solved = True
             else:
                 # self.get_logger().info("Checking for collisions ...")
                 # Check previous RRT solution new octomap collisions
@@ -386,7 +388,7 @@ class GlobalPlanner(Node):
             target_distance = self.distance_to_target(self.wayp_idx)
             
 
-            if target_distance < 0.1:
+            if target_distance < 0.15:
                 if self.wayp_idx == (self.n_waypoints - 1):
                     pass
                     # self.wayp_idx = 0
@@ -416,7 +418,7 @@ class GlobalPlanner(Node):
 
             
             #self.get_logger().info(f"Current target waypoint {self.wayp_idx}")
-            #print(f"Curr wayp: {self.wayp_idx} - dist: {target_distance}")
+            print(f"Curr wayp: {self.wayp_idx} - dist: {target_distance}")
 
             target_waypoint = self.trajectory_waypoints[self.wayp_idx]
             wayp_msg = self.create_waypoint_msg(
@@ -424,9 +426,9 @@ class GlobalPlanner(Node):
             )
             self.waypoint_publisher.publish(wayp_msg)
         
-        wayp_msg = Int16()
-        wayp_msg.data = int(self.wayp_idx)
-        self.curr_wayp_pub.publish(wayp_msg)
+            wayp_msg = Int16()
+            wayp_msg.data = int(self.wayp_idx)
+            self.curr_wayp_pub.publish(wayp_msg)
     
     def recalculate_RRT_if_octomap_collision(self): 
         time_check_i = time.time()
