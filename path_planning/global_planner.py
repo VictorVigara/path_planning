@@ -39,7 +39,7 @@ class GlobalPlanner(Node):
         self.mode = RRT_Mode.RRT_STAR
 
         # Use octomap
-        self.use_octomap = False
+        self.use_octomap = True
 
         # Octomap
         self.octomap_resolution = 0.7  # Octomap resolution is 0.1, but when inserted in search space with the same
@@ -50,7 +50,7 @@ class GlobalPlanner(Node):
         self.RRT_search_space_range_x = (-1, 5)
         self.RRT_search_space_range_y = (-4, 4)
         self.RRT_search_space_range_z = (1, 1.5)
-        self.RRT_goal = (4, -2, 1.5)
+        self.RRT_goal = (4.7, 0, 1.5)
         self.RRT_initial = (0, 0, 1)
         self.RRT_q = 0.3  # length of tree edges
         self.RRT_r = (
@@ -351,8 +351,9 @@ class GlobalPlanner(Node):
                         self.get_logger().info(
                             f"Path recalculated: {recalculated_path}"
                         )
-                        self.trajectory_waypoints = recalculated_path
-                        self.wayp_idx = 0
+                        self.trajectory_waypoints = previous_wayp + recalculated_path
+                        self.n_waypoints = len(self.trajectory_waypoints)
+                        #self.wayp_idx = 0
                         self.get_logger().info(
                             f"Global path updated: {self.trajectory_waypoints}"
                         )
@@ -374,7 +375,7 @@ class GlobalPlanner(Node):
                     self.wayp_idx -= 1
                     # REcovery flag to not go to another previous waypoint while recovering
                     self.collision_recovering = True
-                    print(f"Collision previous waypoint {self.wayp_idx}")
+                    print(f"Collision detected, go to previous waypoint {self.wayp_idx}")
             target_distance = self.distance_to_target(self.wayp_idx)
             
 
@@ -389,12 +390,13 @@ class GlobalPlanner(Node):
                     # Recover collision when previous target waypoint reached
                     self.collision_recovering = False
                 elif self.platform_collision == True and self.collision_recovering == True: 
-                    # Set to false so next iteration we will go to previous waypoint
-                    self.collision_recovering = False
+                    if self.wayp_idx != 0:
+                        self.wayp_idx -= 1
+                        print(f"Collision detected, go to previous waypoint {self.wayp_idx}")
 
             
             #self.get_logger().info(f"Current target waypoint {self.wayp_idx}")
-            print(f"Curr wayp: {self.wayp_idx} - dist: {target_distance}")
+            #print(f"Curr wayp: {self.wayp_idx} - dist: {target_distance}")
 
             target_waypoint = self.trajectory_waypoints[self.wayp_idx]
             wayp_msg = self.create_waypoint_msg(
