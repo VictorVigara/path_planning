@@ -37,9 +37,10 @@ class GlobalPlanner(Node):
 
         ### Parameters ###########################################
         self.mode = RRT_Mode.RRT_STAR
+        self.drone_radius = 0.44
 
         # Use octomap
-        self.use_octomap = True
+        self.use_octomap = False
 
         # Octomap
         self.octomap_resolution = 0.7  # Octomap resolution is 0.1, but when inserted in search space with the same
@@ -113,6 +114,7 @@ class GlobalPlanner(Node):
         )
 
         self.pc2_pub = self.create_publisher(PointCloud2, "read_pc", 1)
+        self.obstacles_collision_pub = self.create_publisher(PointCloud2, "contact_obstacles", 1)
 
         self.vehicle_path_pub = self.create_publisher(Path, "/RRT_path", 1)
         self.vehicle_path_msg = Path()
@@ -144,10 +146,9 @@ class GlobalPlanner(Node):
         # Platform collision variables
         self.platform_collision = False  # Set to True when collision detected
         self.collision_recovering = (
-            False  # set to True when previous waypoint sent and not reached
+            False  # set to True when previous waypoint while collision sent and not reached
         )
-        # Once previous waypoint has been reached, it will be set to False, so
-        # If still collision, go ot the previous waypoint again
+        self.platform_collision_obstacles = []    # stores obstacles collided centers
 
         self.get_logger().info("Initializing RRT search space")
         self.X_dimensions = np.array(
@@ -184,10 +185,48 @@ class GlobalPlanner(Node):
             self.get_logger().info(
                 f"Receiving collision from {self.platform_collision_orientation} - {self.platform_collision_displacement} cm"
             )
+            
+            # TODO: If no contact orientation reliable, set the angle inside cos and sin as 0, so the obstacle will be added in front of the drone (y=0)
+            # get obstacle center coords from drone frame
+            x_uav_obs = math.cos(math.radians(self.platform_collision_orientation)) * (self.drone_radius )  # + self.octomap_resolution/2
+            y_uav_obs = math.sin(math.radians(self.platform_collision_orientation)) * (self.drone_radius )  # + self.octomap_resolution/2
+
+            # Obstacle coords from uav
+            obs_uav = np.array([x_uav_obs, y_uav_obs, 0])
+            print(f"Obstacle in drone frame = {obs_uav}")
+            
+            # TODO: premultiply uav rotation from world frame (now not used because yaw always 0 -> no rotation)
+            obs_world = obs_uav + np.array(self.vehicle_position)
+            print(f"Obstacle world = {obs_world} / drone: {self.vehicle_position}")
+
+            self.platform_collision_obstacles.append(obs_world)
+        
+            pc2_cropped = PointCloud2()
+            pc2_cropped.header.stamp = self.get_clock().now().to_msg()
+            pc2_cropped.header.frame_id = "world"
+            pc2_cropped.height = 1
+            pc2_cropped.width = len(self.platform_collision_obstacles)
+            pc2_cropped.fields.append(
+                PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1)
+            )
+            pc2_cropped.fields.append(
+                PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1)
+            )
+            pc2_cropped.fields.append(
+                PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1)
+            )
+            pc2_cropped.is_bigendian = False
+            pc2_cropped.point_step = 12  # 4 (x) + 4 (y) + 4 (z) bytes per point
+            pc2_cropped.row_step = pc2_cropped.point_step * len(
+                self.platform_collision_obstacles
+            )
+            pc2_cropped.data = np.array(
+                self.platform_collision_obstacles, dtype=np.float32
+            ).tobytes()
+            self.obstacles_collision_pub.publish(pc2_cropped)
 
     def octomap_pc2_callback(self, pointcloud: PointCloud2) -> None:
         # self.get_logger().info("Octomap pointcloud received")
-        # self.obstacles = []
         self.octomap_occupied_pointcloud = []
         pc_init_time = time.time()
         self.X = SearchSpace(self.X_dimensions)
@@ -207,13 +246,19 @@ class GlobalPlanner(Node):
             ):
                 obstacle = self.point_to_obstacle([x, y, z])
                 self.X.obs.insert(uuid.uuid4().int, tuple(obstacle), tuple(obstacle))
-                # self.obstacles.append(obstacle)
-                """ self.octomap_occupied_pointcloud.append([x, y, z]) """
+                self.octomap_occupied_pointcloud.append([x, y, z])
         pc_final_time = time.time()
         #self.get_logger().info(f"Fill search space: {(pc_final_time-init_ss_time)*1000}")
 
+        # Insert obstacles from collision platform 
+        if len(self.platform_collision_obstacles) > 0: 
+            for obs in self.platform_collision_obstacles: 
+                obstacle = self.point_to_obstacle(obs)
+                self.X.obs.insert(uuid.uuid4().int, tuple(obstacle), tuple(obstacle))
+                self.octomap_occupied_pointcloud.append(obs)
+
         # self.get_logger().info(f"Ptcloud callback time: {(pc_final_time-pc_init_time)*1000}")
-        """ if self.save_pc2_octomap:
+        if self.save_pc2_octomap:
             with open("pc2_octomap_list", "wb") as fp:  # Pickling
                 pickle.dump(self.octomap_occupied_pointcloud, fp)
 
@@ -240,7 +285,7 @@ class GlobalPlanner(Node):
         pc2_cropped.data = np.array(
             self.octomap_occupied_pointcloud, dtype=np.float32
         ).tobytes()
-        self.pc2_pub.publish(pc2_cropped) """
+        self.pc2_pub.publish(pc2_cropped)
 
         self.octomap_received = True
 
@@ -308,56 +353,8 @@ class GlobalPlanner(Node):
             else:
                 # self.get_logger().info("Checking for collisions ...")
                 # Check previous RRT solution new octomap collisions
-                # TODO: Check for collision with the new map update
-                # self.octomap_collision = True
-                time_check_i = time.time()
-                previous_wayp = self.trajectory_waypoints[
-                    : self.wayp_idx
-                ].copy()  # Waypoints already done
-                wayp_to_check = self.trajectory_waypoints[
-                    self.wayp_idx :
-                ].copy()  # Following waypoints to check a possible collision
-                for idx in range(len(wayp_to_check) - 1):
-                    if not self.X.collision_free(
-                        wayp_to_check[idx], wayp_to_check[idx + 1], self.RRT_r
-                    ):
-                        self.get_logger().info(f"Collision detected in wayp {idx}")
-                        self.octomap_collision = True
-                        break
-                time_check_f = time.time()
-
-                #print(f"Time to check collision: {(time_check_f-time_check_i)*1000}")
-                if self.octomap_collision:
-
-                    # TODO: Recalculate a path between the previous waypoint without collision and the goal
-                    initial_recalculated = (
-                        self.trajectory_waypoints[self.wayp_idx][0],
-                        self.trajectory_waypoints[self.wayp_idx][1],
-                        self.trajectory_waypoints[self.wayp_idx][2],
-                    )
-                    self.get_logger().info(f"RRT_initial: {initial_recalculated}")
-                    print(self.RRT_initial)
-                    recalculated_path = self.solve_RRT(
-                        initial_waypoint=initial_recalculated
-                    )
-
-                    if recalculated_path == None:
-                        self.get_logger().info(
-                            f"Recalculated Path RRT no solution, will try again"
-                        )
-
-                    else:
-                        self.get_logger().info(f"Path already done: {previous_wayp}")
-                        self.get_logger().info(
-                            f"Path recalculated: {recalculated_path}"
-                        )
-                        self.trajectory_waypoints = previous_wayp + recalculated_path
-                        self.n_waypoints = len(self.trajectory_waypoints)
-                        #self.wayp_idx = 0
-                        self.get_logger().info(
-                            f"Global path updated: {self.trajectory_waypoints}"
-                        )
-                        self.octomap_collision = False
+                # Check for collision with the new map update                
+                self.recalculate_RRT_if_octomap_collision()
 
             self.octomap_received = False
 
@@ -385,10 +382,23 @@ class GlobalPlanner(Node):
                     # self.wayp_idx = 0
                     # self.goal_reached = True
                 elif self.octomap_collision == False and self.platform_collision == False:
+                    # If drone was in collision and it is recoverd, recalculate path
+                    if self.collision_recovering == True: 
+                        # Recover collision when previous target waypoint reached and no collision detected
+                        self.collision_recovering = False
+                        # Recalculate path including collision in map
+                        if len(self.platform_collision_obstacles) > 0: 
+                            for obs in self.platform_collision_obstacles: 
+                                obstacle = self.point_to_obstacle(obs)
+                                print(f"Insert contact detection obstacle in search space")
+                                self.X.obs.insert(uuid.uuid4().int, tuple(obstacle), tuple(obstacle))
+                        self.get_logger().warning(f"Recalculating RRT due to contact detection")
+                        self.recalculate_RRT_from_current_wayp()
+                        
                     self.wayp_idx += 1
                     print(f"Next waypoint {self.wayp_idx}")
-                    # Recover collision when previous target waypoint reached
-                    self.collision_recovering = False
+                    
+
                 elif self.platform_collision == True and self.collision_recovering == True: 
                     if self.wayp_idx != 0:
                         self.wayp_idx -= 1
@@ -403,6 +413,62 @@ class GlobalPlanner(Node):
                 target_waypoint[0], target_waypoint[1], target_waypoint[2]
             )
             self.waypoint_publisher.publish(wayp_msg)
+    
+    def recalculate_RRT_if_octomap_collision(self): 
+        time_check_i = time.time()
+        previous_wayp = self.trajectory_waypoints[
+            : self.wayp_idx
+        ].copy()  # Waypoints already done
+        wayp_to_check = self.trajectory_waypoints[
+            self.wayp_idx :
+        ].copy()  # Following waypoints to check a possible collision
+        for idx in range(len(wayp_to_check) - 1):
+            if not self.X.collision_free(
+                wayp_to_check[idx], wayp_to_check[idx + 1], self.RRT_r
+            ):
+                self.get_logger().info(f"Collision detected in wayp {idx}")
+                self.octomap_collision = True
+                break
+        time_check_f = time.time()
+
+        #print(f"Time to check collision: {(time_check_f-time_check_i)*1000}")
+        if self.octomap_collision:
+            self.recalculate_RRT_from_current_wayp()
+
+    def recalculate_RRT_from_current_wayp(self): 
+        previous_wayp = self.trajectory_waypoints[
+        : self.wayp_idx
+        ].copy()  # Waypoints already done
+
+        # TODO: Recalculate a path between the previous waypoint without collision and the goal
+        initial_recalculated = (
+            self.trajectory_waypoints[self.wayp_idx][0],
+            self.trajectory_waypoints[self.wayp_idx][1],
+            self.trajectory_waypoints[self.wayp_idx][2],
+        )
+        self.get_logger().info(f"RRT_initial: {initial_recalculated}")
+        print(self.RRT_initial)
+        recalculated_path = self.solve_RRT(
+            initial_waypoint=initial_recalculated
+        )
+
+        if recalculated_path == None:
+            self.get_logger().info(
+                f"Recalculated Path RRT no solution, will try again"
+            )
+
+        else:
+            self.get_logger().info(f"Path already done: {previous_wayp}")
+            self.get_logger().info(
+                f"Path recalculated: {recalculated_path}"
+            )
+            self.trajectory_waypoints = previous_wayp + recalculated_path
+            self.n_waypoints = len(self.trajectory_waypoints)
+            #self.wayp_idx = 0
+            self.get_logger().info(
+                f"Global path updated: {self.trajectory_waypoints}"
+            )
+            self.octomap_collision = False
 
     def solve_RRT(self, initial_waypoint):
         traj_wayp = []
