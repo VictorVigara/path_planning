@@ -189,17 +189,17 @@ class GlobalPlanner(Node):
             self.platform_collision_orientation = contact_msg.data[1]
             self.platform_collision_displacement = contact_msg.data[2]
 
-        if self.platform_collision and self.collision_recovering == False:
-            self.get_logger().info(
-                f"Receiving collision from {self.platform_collision_orientation} - {self.platform_collision_displacement} cm"
-            )
-            
-            # TODO: If no contact orientation reliable, set the angle inside cos and sin as 0, so the obstacle will be added in front of the drone (y=0)
-            # get obstacle center coords from drone frame
-            """ x_uav_obs = math.cos(math.radians(self.platform_collision_orientation)) * (self.drone_radius )  # + self.octomap_resolution/2
-            y_uav_obs = math.sin(math.radians(self.platform_collision_orientation)) * (self.drone_radius )  # + self.octomap_resolution/2 """
-            x_uav_obs =  (self.drone_radius )  # + self.octomap_resolution/2
-            y_uav_obs = 0  # + self.octomap_resolution/2
+            if self.platform_collision and self.collision_recovering == False:
+                self.get_logger().info(
+                    f"Receiving collision from {self.platform_collision_orientation} - {self.platform_collision_displacement} cm"
+                )
+                
+                # TODO: If no contact orientation reliable, set the angle inside cos and sin as 0, so the obstacle will be added in front of the drone (y=0)
+                # get obstacle center coords from drone frame
+                """ x_uav_obs = math.cos(math.radians(self.platform_collision_orientation)) * (self.drone_radius )  # + self.octomap_resolution/2
+                y_uav_obs = math.sin(math.radians(self.platform_collision_orientation)) * (self.drone_radius )  # + self.octomap_resolution/2 """
+                x_uav_obs =  (self.drone_radius )  # + self.octomap_resolution/2
+                y_uav_obs = 0  # + self.octomap_resolution/2
 
                 # Obstacle coords from uav
                 obs_uav = np.array([x_uav_obs, y_uav_obs, 0])
