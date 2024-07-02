@@ -12,7 +12,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import PointCloud2, PointField
 from sensor_msgs_py import point_cloud2
-from std_msgs.msg import Float32MultiArray
+from std_msgs.msg import Float32MultiArray, Int16
 
 from .trajectory_generation.rrt_algorithms.rrt.rrt import RRT
 from .trajectory_generation.rrt_algorithms.rrt.rrt_star import RRTStar
@@ -118,6 +118,8 @@ class GlobalPlanner(Node):
 
         self.vehicle_path_pub = self.create_publisher(Path, "/RRT_path", 1)
         self.vehicle_path_msg = Path()
+
+        self.curr_wayp_pub = self.create_publisher(Int16, "/curr_waypoint", 1)
 
         ### Timers ###
 
@@ -413,6 +415,10 @@ class GlobalPlanner(Node):
                 target_waypoint[0], target_waypoint[1], target_waypoint[2]
             )
             self.waypoint_publisher.publish(wayp_msg)
+        
+        wayp_msg = Int16()
+        wayp_msg.data = int(self.wayp_idx)
+        self.curr_wayp_pub.publish(wayp_msg)
     
     def recalculate_RRT_if_octomap_collision(self): 
         time_check_i = time.time()
