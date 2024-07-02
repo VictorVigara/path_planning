@@ -41,6 +41,10 @@ class GlobalPlanner(Node):
 
         # Use octomap
         self.use_octomap = False
+        self.use_platform = False
+
+        # Start taking off or from air
+        self.take_off = False   # Take off manually and start planning from current pose in air
 
         # Octomap
         self.octomap_resolution = 0.7  # Octomap resolution is 0.1, but when inserted in search space with the same
@@ -53,9 +57,9 @@ class GlobalPlanner(Node):
         self.RRT_search_space_range_z = (1, 1.5)
         self.RRT_goal = (4.7, 0, 1.5)
         self.RRT_initial = (0, 0, 1)
-        self.RRT_q = 0.3  # length of tree edges
+        self.RRT_q = 0.05  # length of tree edges
         self.RRT_r = (
-            0.1  # length of smallest edge to check for intersection with obstacles
+            0.04  # length of smallest edge to check for intersection with obstacles
         )
         self.RRT_max_samples = 3000  # max number of samples to take before timing out
         self.RRT_prc = 0.1  # probability of checking for a connection to goal
@@ -174,58 +178,60 @@ class GlobalPlanner(Node):
         self.vehicle_position = [x, y,z]
 
     def contact_callback(self, contact_msg: Float32MultiArray) -> None:
-        collision = contact_msg.data[0]
-        if collision == 0.0:
-            self.platform_collision = False
-        elif collision == 1.0:
-            self.platform_collision = True
 
-        self.platform_collision_orientation = contact_msg.data[1]
-        self.platform_collision_displacement = contact_msg.data[2]
+        if self.use_platform: 
+            collision = contact_msg.data[0]
+            if collision == 0.0:
+                self.platform_collision = False
+            elif collision == 1.0:
+                self.platform_collision = True
 
-        if self.platform_collision and self.collision_recovering == False:
-            self.get_logger().info(
-                f"Receiving collision from {self.platform_collision_orientation} - {self.platform_collision_displacement} cm"
-            )
+            self.platform_collision_orientation = contact_msg.data[1]
+            self.platform_collision_displacement = contact_msg.data[2]
+
+            if self.platform_collision and self.collision_recovering == False:
+                self.get_logger().info(
+                    f"Receiving collision from {self.platform_collision_orientation} - {self.platform_collision_displacement} cm"
+                )
+                
+                # TODO: If no contact orientation reliable, set the angle inside cos and sin as 0, so the obstacle will be added in front of the drone (y=0)
+                # get obstacle center coords from drone frame
+                x_uav_obs = math.cos(math.radians(self.platform_collision_orientation)) * (self.drone_radius )  # + self.octomap_resolution/2
+                y_uav_obs = math.sin(math.radians(self.platform_collision_orientation)) * (self.drone_radius )  # + self.octomap_resolution/2
+
+                # Obstacle coords from uav
+                obs_uav = np.array([x_uav_obs, y_uav_obs, 0])
+                print(f"Obstacle in drone frame = {obs_uav}")
+                
+                # TODO: premultiply uav rotation from world frame (now not used because yaw always 0 -> no rotation)
+                obs_world = obs_uav + np.array(self.vehicle_position)
+                print(f"Obstacle world = {obs_world} / drone: {self.vehicle_position}")
+
+                self.platform_collision_obstacles.append(obs_world)
             
-            # TODO: If no contact orientation reliable, set the angle inside cos and sin as 0, so the obstacle will be added in front of the drone (y=0)
-            # get obstacle center coords from drone frame
-            x_uav_obs = math.cos(math.radians(self.platform_collision_orientation)) * (self.drone_radius )  # + self.octomap_resolution/2
-            y_uav_obs = math.sin(math.radians(self.platform_collision_orientation)) * (self.drone_radius )  # + self.octomap_resolution/2
-
-            # Obstacle coords from uav
-            obs_uav = np.array([x_uav_obs, y_uav_obs, 0])
-            print(f"Obstacle in drone frame = {obs_uav}")
-            
-            # TODO: premultiply uav rotation from world frame (now not used because yaw always 0 -> no rotation)
-            obs_world = obs_uav + np.array(self.vehicle_position)
-            print(f"Obstacle world = {obs_world} / drone: {self.vehicle_position}")
-
-            self.platform_collision_obstacles.append(obs_world)
-        
-            pc2_cropped = PointCloud2()
-            pc2_cropped.header.stamp = self.get_clock().now().to_msg()
-            pc2_cropped.header.frame_id = "world"
-            pc2_cropped.height = 1
-            pc2_cropped.width = len(self.platform_collision_obstacles)
-            pc2_cropped.fields.append(
-                PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1)
-            )
-            pc2_cropped.fields.append(
-                PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1)
-            )
-            pc2_cropped.fields.append(
-                PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1)
-            )
-            pc2_cropped.is_bigendian = False
-            pc2_cropped.point_step = 12  # 4 (x) + 4 (y) + 4 (z) bytes per point
-            pc2_cropped.row_step = pc2_cropped.point_step * len(
-                self.platform_collision_obstacles
-            )
-            pc2_cropped.data = np.array(
-                self.platform_collision_obstacles, dtype=np.float32
-            ).tobytes()
-            self.obstacles_collision_pub.publish(pc2_cropped)
+                pc2_cropped = PointCloud2()
+                pc2_cropped.header.stamp = self.get_clock().now().to_msg()
+                pc2_cropped.header.frame_id = "world"
+                pc2_cropped.height = 1
+                pc2_cropped.width = len(self.platform_collision_obstacles)
+                pc2_cropped.fields.append(
+                    PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1)
+                )
+                pc2_cropped.fields.append(
+                    PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1)
+                )
+                pc2_cropped.fields.append(
+                    PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1)
+                )
+                pc2_cropped.is_bigendian = False
+                pc2_cropped.point_step = 12  # 4 (x) + 4 (y) + 4 (z) bytes per point
+                pc2_cropped.row_step = pc2_cropped.point_step * len(
+                    self.platform_collision_obstacles
+                )
+                pc2_cropped.data = np.array(
+                    self.platform_collision_obstacles, dtype=np.float32
+                ).tobytes()
+                self.obstacles_collision_pub.publish(pc2_cropped)
 
     def octomap_pc2_callback(self, pointcloud: PointCloud2) -> None:
         # self.get_logger().info("Octomap pointcloud received")
@@ -479,6 +485,10 @@ class GlobalPlanner(Node):
     def solve_RRT(self, initial_waypoint):
         traj_wayp = []
         initial_rrt_time = time.time()
+
+        # If take off manually, solve RRT from current position in air
+        if not self.take_off and not self.initial_RRT_solved: 
+            initial_waypoint = (self.vehicle_position[0], self.vehicle_position[1], self.vehicle_position[2])
 
         if self.mode == RRT_Mode.RRT:
             self.get_logger().info("Solving RRT")
