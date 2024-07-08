@@ -44,10 +44,13 @@ class GlobalPlanner(Node):
         self.use_platform = True
 
         # Start taking off or from air
-        self.take_off = False   # Take off manually and start planning from current pose in air
+        self.take_off = True   # Take off manually and start planning from current pose in air
+
+        # Contact mapping resolution
+        self.contact_map_resolution = 0.88
 
         # Octomap
-        self.octomap_resolution = 0.7  # Octomap resolution is 0.1, but when inserted in search space with the same
+        self.octomap_resolution = 0.88  # Octomap resolution is 0.1, but when inserted in search space with the same
         # resolution, there could be small spaces that could led to paths between the obstacle.
         # So, the seacrh space is set up with a bit of lower resolution to fill the gaps.
 
@@ -254,7 +257,7 @@ class GlobalPlanner(Node):
                 (x > self.x_crop or x < -self.x_crop)
                 or (y > self.y_crop or y < -self.y_crop)
             ):
-                obstacle = self.point_to_obstacle([x, y, z])
+                obstacle = self.point_to_obstacle([x, y, z], self.octomap_resolution)
                 self.X.obs.insert(uuid.uuid4().int, tuple(obstacle), tuple(obstacle))
                 self.octomap_occupied_pointcloud.append([x, y, z])
         pc_final_time = time.time()
@@ -263,7 +266,7 @@ class GlobalPlanner(Node):
         # Insert obstacles from collision platform 
         if len(self.platform_collision_obstacles) > 0: 
             for obs in self.platform_collision_obstacles: 
-                obstacle = self.point_to_obstacle(obs)
+                obstacle = self.point_to_obstacle(obs, self.contact_map_resolution)
                 self.X.obs.insert(uuid.uuid4().int, tuple(obstacle), tuple(obstacle))
                 self.octomap_occupied_pointcloud.append(obs)
 
@@ -401,7 +404,7 @@ class GlobalPlanner(Node):
                         # Recalculate path including collision in map
                         if len(self.platform_collision_obstacles) > 0: 
                             for obs in self.platform_collision_obstacles: 
-                                obstacle = self.point_to_obstacle(obs)
+                                obstacle = self.point_to_obstacle(obs, self.contact_map_resolution)
                                 print(f"Insert contact detection obstacle in search space")
                                 self.X.obs.insert(uuid.uuid4().int, tuple(obstacle), tuple(obstacle))
                         self.get_logger().warning(f"Recalculating RRT due to contact detection")
@@ -622,9 +625,9 @@ class GlobalPlanner(Node):
 
         return distance
 
-    def point_to_obstacle(self, point):
-        x1, y1, z1 = [coord - self.octomap_resolution / 2 for coord in point]
-        x2, y2, z2 = [coord + self.octomap_resolution / 2 for coord in point]
+    def point_to_obstacle(self, point, resolution):
+        x1, y1, z1 = [coord - resolution / 2 for coord in point]
+        x2, y2, z2 = [coord + resolution / 2 for coord in point]
         obstacle = [x1, y1, z1, x2, y2, z2]
         return obstacle
 
