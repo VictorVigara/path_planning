@@ -44,10 +44,10 @@ class GlobalPlanner(Node):
         self.use_platform = True
 
         # Start taking off or from air
-        self.take_off = True   # Take off manually and start planning from current pose in air
+        self.take_off = False   # Take off manually and start planning from current pose in air
 
         # Contact mapping resolution
-        self.contact_map_resolution = 0.88
+        self.contact_map_resolution = 0.7
 
         # Octomap
         self.octomap_resolution = 0.88  # Octomap resolution is 0.1, but when inserted in search space with the same
@@ -55,7 +55,7 @@ class GlobalPlanner(Node):
         # So, the seacrh space is set up with a bit of lower resolution to fill the gaps.
 
         # RRT
-        self.RRT_search_space_range_x = (-2, 3)
+        self.RRT_search_space_range_x = (-1, 3)
         self.RRT_search_space_range_y = (-2, 2)
         self.RRT_search_space_range_z = (0.5, 1.5)
         self.RRT_goal = (3, 0, 1)
