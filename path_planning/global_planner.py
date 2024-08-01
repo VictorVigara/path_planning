@@ -40,25 +40,25 @@ class GlobalPlanner(Node):
         self.drone_radius = 0.44
 
         # Use octomap
-        self.use_octomap = False
+        self.use_octomap = True
         self.use_platform = True
 
         # Start taking off or from air
         self.take_off = False   # Take off manually and start planning from current pose in air
 
         # Contact mapping resolution
-        self.contact_map_resolution = 0.7
+        self.contact_map_resolution = 1.0
 
         # Octomap
-        self.octomap_resolution = 0.88  # Octomap resolution is 0.1, but when inserted in search space with the same
+        self.octomap_resolution = 0.95  # Octomap resolution is 0.1, but when inserted in search space with the same
         # resolution, there could be small spaces that could led to paths between the obstacle.
         # So, the seacrh space is set up with a bit of lower resolution to fill the gaps.
 
         # RRT
-        self.RRT_search_space_range_x = (-1, 3)
-        self.RRT_search_space_range_y = (-2, 2)
-        self.RRT_search_space_range_z = (0.5, 1.5)
-        self.RRT_goal = (3, 0, 1)
+        self.RRT_search_space_range_x = (-1, 6)
+        self.RRT_search_space_range_y = (-2, 0.3)
+        self.RRT_search_space_range_z = (0.9, 1)
+        self.RRT_goal = (5, 0, 1)
         self.RRT_initial = (0, 0, 1)
         self.RRT_q = 0.1  # length of tree edges
         self.RRT_r = (
@@ -74,6 +74,9 @@ class GlobalPlanner(Node):
         # Octomap pointcloud box filter
         self.x_crop = 0.44
         self.y_crop = 0.44
+        self.z_crop = 2.0
+
+        self.step_back = 3
 
         ###########################################################
 
@@ -199,10 +202,10 @@ class GlobalPlanner(Node):
                 
                 # TODO: If no contact orientation reliable, set the angle inside cos and sin as 0, so the obstacle will be added in front of the drone (y=0)
                 # get obstacle center coords from drone frame
-                """ x_uav_obs = math.cos(math.radians(self.platform_collision_orientation)) * (self.drone_radius )  # + self.octomap_resolution/2
-                y_uav_obs = math.sin(math.radians(self.platform_collision_orientation)) * (self.drone_radius )  # + self.octomap_resolution/2 """
-                x_uav_obs =  (self.drone_radius )  # + self.octomap_resolution/2
-                y_uav_obs = 0  # + self.octomap_resolution/2
+                x_uav_obs = math.cos(math.radians(self.platform_collision_orientation)) * (self.drone_radius )  # + self.octomap_resolution/2
+                y_uav_obs = math.sin(math.radians(self.platform_collision_orientation)) * (self.drone_radius )  # + self.octomap_resolution/2
+                """ x_uav_obs =  (self.drone_radius )  # + self.octomap_resolution/2
+                y_uav_obs = 0  # + self.octomap_resolution/2 """
 
                 # Obstacle coords from uav
                 obs_uav = np.array([x_uav_obs, y_uav_obs, 0])
@@ -253,10 +256,7 @@ class GlobalPlanner(Node):
             y = p[1]
             z = p[2]
 
-            if z > 0.1 and (
-                (x > self.x_crop or x < -self.x_crop)
-                or (y > self.y_crop or y < -self.y_crop)
-            ):
+            if z > self.z_crop or (y > 0.5 or y < -1.8):
                 obstacle = self.point_to_obstacle([x, y, z], self.octomap_resolution)
                 self.X.obs.insert(uuid.uuid4().int, tuple(obstacle), tuple(obstacle))
                 self.octomap_occupied_pointcloud.append([x, y, z])
@@ -383,8 +383,8 @@ class GlobalPlanner(Node):
 
             # If collision detected, go to the  previous waypoint
             if self.platform_collision and self.collision_recovering == False:
-                if self.wayp_idx != 0:
-                    self.wayp_idx -= 1
+                if self.wayp_idx > self.step_back:
+                    self.wayp_idx -= self.step_back
                     # REcovery flag to not go to another previous waypoint while recovering
                     self.collision_recovering = True
                     print(f"Collision detected, go to previous waypoint {self.wayp_idx}")
@@ -415,8 +415,8 @@ class GlobalPlanner(Node):
                     
 
                 elif self.platform_collision == True and self.collision_recovering == True: 
-                    if self.wayp_idx != 0:
-                        self.wayp_idx -= 1
+                    if self.wayp_idx > self.step_back:
+                        self.wayp_idx -= self.step_back
                         print(f"Collision detected, go to previous waypoint {self.wayp_idx}")
 
             
@@ -496,6 +496,8 @@ class GlobalPlanner(Node):
         # If take off manually, solve RRT from current position in air
         if not self.take_off and not self.initial_RRT_solved: 
             initial_waypoint = (self.vehicle_position[0], self.vehicle_position[1], self.vehicle_position[2])
+            print(f"Initial waypoint: {initial_waypoint}")
+            print(f"Target waypoint: {self.RRT_goal}")
 
         if self.mode == RRT_Mode.RRT:
             self.get_logger().info("Solving RRT")
